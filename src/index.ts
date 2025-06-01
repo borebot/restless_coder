@@ -1,5 +1,10 @@
 #!/usr/bin/env node
 
+import * as http from 'http';
+import * as fs from 'fs';
+import * as path from 'path';
+import { fileURLToPath } from 'url';
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -8,11 +13,16 @@ import {
   McpError,
   ErrorCode,
 } from "@modelcontextprotocol/sdk/types.js";
-import * as http from 'http';
-import * as fs from 'fs';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
-import { handleRootOrIndex, handleSubmitTranscribedText, handleVoiceEvents, handleStaticFile, handleNotFound } from './httpHandlers.js';
+
+// Define constants needed by other modules or this module globally
+// Recreate __dirname for ES module scope as it's not available directly.
+// import.meta.url gives the URL of the current module file.
+const __filename_esm = fileURLToPath(import.meta.url);
+const __dirname_esm = path.dirname(__filename_esm);
+
+// When running the compiled code from 'build/index.js', __dirname_esm will be 'restless_coder/build/'.
+// The 'ui' directory is expected to be at 'restless_coder/ui/', so the relative path is '../ui/index.html'.
+export const UI_FILE_PATH = path.join(__dirname_esm, '..', 'ui', 'index.html');
 
 // Shared state for "listen" mode in process_voice_command
 // Exported as objects to allow httpHandlers.ts to modify the .current property
@@ -21,6 +31,110 @@ export const rejectVoiceCommandPromise = { current: null as ((error: Error) => v
 
 // SSE Clients - exported to be managed by httpHandlers
 export let sseClients: http.ServerResponse[] = [];
+
+// Import local modules that might depend on the above exports
+import { handleRootOrIndex, handleSubmitTranscribedText, handleVoiceEvents, handleStaticFile, handleNotFound } from './httpHandlers.js';
+
+// Helper function for SendCommandResponseMode
+async function handleSendCommandResponseMode(
+  args: { response_speech_text: string; response_display_text?: string },
+  clients: http.ServerResponse[]
+) {
+  console.log(`[Tool Process] SendResponse mode. Speech: "${args.response_speech_text}", Display: "${args.response_display_text || args.response_speech_text}"`);
+  if (clients.length === 0) {
+    console.warn('[Tool Process] No UI clients connected via SSE to send response to.');
+  }
+  const payload = JSON.stringify({
+    displayText: args.response_display_text || args.response_speech_text,
+    speechText: args.response_speech_text,
+  });
+  clients.forEach(client => {
+    try {
+      client.write(`data: ${payload}\n\n`);
+    } catch (e) {
+      console.error('[SSE] Error writing to a client, it might have disconnected abruptly:', e);
+    }
+  });
+  return {
+    content: [{ type: "text", text: "Response sent to UI via SSE." }],
+  };
+}
+
+// Helper function for ProcessAudioMode
+async function handleProcessAudioMode(
+  args: { audio_data: string; audio_input_type: string; speech_service_id: string; coding_assistant_id: string }
+): Promise<string> {
+  console.log(`[Tool Process] Process mode for coding_assistant_id: ${args.coding_assistant_id}`);
+  if (args.speech_service_id === "webspeech") {
+    console.log(`[Tool Process] Received pre-transcribed text (webspeech): "${args.audio_data}"`);
+    return args.audio_data;
+  }
+  
+  // Default path if not "webspeech"
+  console.log(`[Tool Process] Transcribing audio using ${args.speech_service_id} from ${args.audio_input_type}...`);
+  const transcribedText = `Placeholder: Server-side transcribed text for "${args.audio_data}"`; // Placeholder
+  console.log(`[Tool Process] Transcribed text: "${transcribedText}"`);
+  return transcribedText;
+}
+
+// Helper function for ListenMode (Restored refactored version)
+async function handleListenMode(): Promise<string> {
+  console.log('[Tool Process] Listen mode activated. Waiting for transcribed text...');
+  if (resolveVoiceCommandPromise.current || rejectVoiceCommandPromise.current) {
+    throw new McpError(ErrorCode.InvalidRequest, "Another listen operation is already in progress.");
+  }
+
+  let listenTimeoutId: any = null; // Using 'any' for broader compatibility (NodeJS.Timeout or number)
+
+  return new Promise<string>((resolve, reject) => {
+    const settle = (action: () => void) => {
+      if (listenTimeoutId) {
+        clearTimeout(listenTimeoutId);
+        listenTimeoutId = null;
+      }
+      // Null out global references first to prevent re-entry or race conditions
+      resolveVoiceCommandPromise.current = null;
+      rejectVoiceCommandPromise.current = null;
+      action(); // Perform the actual resolve or reject
+    };
+
+    resolveVoiceCommandPromise.current = (text: string) => settle(() => resolve(text));
+    rejectVoiceCommandPromise.current = (error: Error) => settle(() => reject(error));
+
+    listenTimeoutId = setTimeout(() => {
+      // Check if the promise is still pending by looking at one of the global refs
+      if (rejectVoiceCommandPromise.current) {
+        console.warn('[Tool Process] Listen mode timed out after 60 seconds.');
+        // Call the globally stored reject (which is the settle-wrapped version)
+        rejectVoiceCommandPromise.current(new Error("Listen mode timed out after 60 seconds"));
+      }
+      // No need to explicitly null out here, as the settle function handles it.
+    }, 60000);
+  });
+}
+
+// Helper function to process transcribed text and formulate response to Cline
+async function processTranscribedTextAndRespond(
+  transcribedText: string,
+  coding_assistant_id: string,
+  output_format: string
+) {
+  console.log(`[Tool Process] Processing command for ${coding_assistant_id}: "${transcribedText}"`);
+  let assistantResponse: string;
+
+  if (coding_assistant_id === "cline") {
+    assistantResponse = transcribedText;
+  } else {
+    assistantResponse = `Unknown coding assistant (${coding_assistant_id}). Received: "${transcribedText}"`;
+  }
+  console.log(`[Tool Process] Assistant response (to be returned to Cline): "${assistantResponse}"`);
+
+  if (output_format === "audio") {
+    return { content: [{ type: "text", text: "Placeholder: Synthesized audio response." }] };
+  } else {
+    return { content: [{ type: "text", text: assistantResponse }] };
+  }
+}
 
 const server = new Server(
   {
@@ -38,15 +152,6 @@ const server = new Server(
 
 // HTTP Server for UI
 const HTTP_PORT = 6543;
-
-// Recreate __dirname for ES module scope as it's not available directly.
-// import.meta.url gives the URL of the current module file.
-const __filename_esm = fileURLToPath(import.meta.url);
-const __dirname_esm = path.dirname(__filename_esm);
-
-// When running the compiled code from 'build/index.js', __dirname_esm will be 'restless_coder/build/'.
-// The 'ui' directory is expected to be at 'restless_coder/ui/', so the relative path is '../ui/index.html'.
-export const UI_FILE_PATH = path.join(__dirname_esm, '..', 'ui', 'index.html');
 
 const httpServer = http.createServer((req, res) => {
     const urlPath = req.url || '/';
@@ -110,195 +215,134 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Optional. Concise text for Cline's response to be spoken by the UI.",
             },
-            // TODO: Add parameters for voice approval handling if needed
           },
           required: [ // Only coding_assistant_id is strictly required at schema level for all modes.
             "coding_assistant_id",
           ],
         },
-        // TODO: Define outputSchema if the tool returns structured data beyond simple text/audio
       },
+      {
+        name: "get_voice_interaction_protocol",
+        description: "Retrieves the content of the voice interaction protocol document.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        },
+        outputSchema: {
+          type: "object",
+          properties: {
+            protocol_content: {
+              type: "string",
+              description: "The content of the voice interaction protocol document."
+            }
+          },
+          required: ["protocol_content"],
+          additionalProperties: false
+        }
+      }
     ],
   };
 });
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  if (request.params.name !== "process_voice_command") {
+  if (request.params.name === "process_voice_command") {
+    const args = request.params.arguments;
+
+    // Argument validation
+    if (!args || typeof args !== "object" || !args.coding_assistant_id) {
+      throw new McpError(ErrorCode.InvalidParams, "Missing required argument: coding_assistant_id");
+    }
+
+    // Type assertion for arguments
+    const toolArgs = args as {
+      audio_input_type?: string;
+      audio_data?: string;
+      speech_service_id?: string;
+      coding_assistant_id: string;
+      output_format?: string;
+      response_display_text?: string;
+      response_speech_text?: string;
+    };
+
+    try {
+      // Mode 1: Send response to UI via SSE
+      if (toolArgs.response_speech_text) {
+        return await handleSendCommandResponseMode(
+          { response_speech_text: toolArgs.response_speech_text, response_display_text: toolArgs.response_display_text },
+          sseClients
+        );
+      }
+      
+      // Modes 2 & 3: Process or Listen for voice command
+      let transcribedText: string;
+
+      if (toolArgs.audio_data && toolArgs.audio_input_type && toolArgs.speech_service_id) {
+        // Process mode
+        transcribedText = await handleProcessAudioMode({
+          audio_data: toolArgs.audio_data,
+          audio_input_type: toolArgs.audio_input_type,
+          speech_service_id: toolArgs.speech_service_id,
+          coding_assistant_id: toolArgs.coding_assistant_id,
+        });
+      } else if (!toolArgs.audio_data && toolArgs.coding_assistant_id === "cline") {
+        // Listen mode
+        transcribedText = await handleListenMode();
+      } else {
+        throw new McpError(ErrorCode.InvalidParams, "Invalid arguments: Must be 'send response', 'listen', or 'process audio' mode.");
+      }
+
+      // Process transcribed text (common for listen/process modes)
+      return await processTranscribedTextAndRespond(
+        transcribedText,
+        toolArgs.coding_assistant_id,
+        toolArgs.output_format || "text"
+      );
+
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      console.error("[Server CallToolRequestSchema - process_voice_command] Error processing voice command:", errorMessage, errorStack);
+      if (rejectVoiceCommandPromise.current) {
+          console.error("[Server CallToolRequestSchema - process_voice_command] Rejecting active listener due to error.");
+          rejectVoiceCommandPromise.current(error instanceof Error ? error : new Error(String(error)));
+          resolveVoiceCommandPromise.current = null;
+          rejectVoiceCommandPromise.current = null;
+      }
+      throw new McpError(
+        ErrorCode.InternalError,
+        `Error processing voice command: ${errorMessage}`
+      );
+    }
+  } else if (request.params.name === "get_voice_interaction_protocol") {
+    try {
+      const protocolFileName = 'voice_interaction_protocol.md';
+      const protocolPath = path.join(__dirname_esm, '..', '.clinerules', protocolFileName);
+
+      if (!fs.existsSync(protocolPath)) {
+          console.error(`[Tool get_voice_interaction_protocol] Protocol file not found at: ${protocolPath}`);
+          throw new McpError(ErrorCode.InternalError, `Protocol file not found: ${protocolFileName}. Expected at ${protocolPath}`);
+      }
+
+      const protocolContent = fs.readFileSync(protocolPath, 'utf-8');
+      console.log(`[Tool get_voice_interaction_protocol] Successfully read protocol file from ${protocolPath}.`);
+      return {
+        content: [{ type: "json", data: { protocol_content: protocolContent } }]
+      };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      console.error("[Tool get_voice_interaction_protocol] Error:", errorMessage, errorStack);
+      if (error instanceof McpError) throw error;
+      throw new McpError(ErrorCode.InternalError, `Error reading protocol file: ${errorMessage}`);
+    }
+  } else {
     throw new McpError(
       ErrorCode.MethodNotFound,
       `Unknown tool: ${request.params.name}`
     );
   }
-
-  const args = request.params.arguments;
-
-  // Argument validation
-  if (!args || typeof args !== "object" || !args.coding_assistant_id) {
-    throw new McpError(ErrorCode.InvalidParams, "Missing required argument: coding_assistant_id");
-  }
-
-  // Type assertion for arguments
-  const toolArgs = args as {
-    audio_input_type?: string;
-    audio_data?: string;
-    speech_service_id?: string;
-    coding_assistant_id: string;
-    output_format?: string;
-    response_display_text?: string;
-    response_speech_text?: string;
-  };
-
-  try {
-    // Mode 1: Send response to UI via SSE
-    if (toolArgs.response_speech_text) {
-      return await handleSendCommandResponseMode(
-        { response_speech_text: toolArgs.response_speech_text, response_display_text: toolArgs.response_display_text },
-        sseClients
-      );
-    }
-    
-    // Modes 2 & 3: Process or Listen for voice command
-    let transcribedText: string;
-
-    if (toolArgs.audio_data && toolArgs.audio_input_type && toolArgs.speech_service_id) {
-      // Process mode
-      transcribedText = await handleProcessAudioMode({
-        audio_data: toolArgs.audio_data,
-        audio_input_type: toolArgs.audio_input_type,
-        speech_service_id: toolArgs.speech_service_id,
-        coding_assistant_id: toolArgs.coding_assistant_id,
-      });
-    } else if (!toolArgs.audio_data && toolArgs.coding_assistant_id === "cline") {
-      // Listen mode
-      transcribedText = await handleListenMode();
-    } else {
-      throw new McpError(ErrorCode.InvalidParams, "Invalid arguments: Must be 'send response', 'listen', or 'process audio' mode.");
-    }
-
-    // Process transcribed text (common for listen/process modes)
-    return await processTranscribedTextAndRespond(
-      transcribedText,
-      toolArgs.coding_assistant_id,
-      toolArgs.output_format || "text"
-    );
-
-  } catch (error: any) {
-    console.error("[Server CallToolRequestSchema] Error processing voice command:", error.message, error.stack);
-    if (rejectVoiceCommandPromise.current) {
-        console.error("[Server CallToolRequestSchema] Rejecting active listener due to error.");
-        rejectVoiceCommandPromise.current(error instanceof Error ? error : new Error(String(error)));
-        resolveVoiceCommandPromise.current = null;
-        rejectVoiceCommandPromise.current = null;
-    }
-    throw new McpError(
-      ErrorCode.InternalError,
-      `Error processing voice command: ${error.message || String(error)}`
-    );
-  }
 });
-
-// Helper function for SendCommandResponseMode
-async function handleSendCommandResponseMode(
-  args: { response_speech_text: string; response_display_text?: string },
-  clients: http.ServerResponse[]
-) {
-  console.log(`[Tool Process] SendResponse mode. Speech: "${args.response_speech_text}", Display: "${args.response_display_text || args.response_speech_text}"`);
-  if (clients.length === 0) {
-    console.warn('[Tool Process] No UI clients connected via SSE to send response to.');
-  }
-  const payload = JSON.stringify({
-    displayText: args.response_display_text || args.response_speech_text,
-    speechText: args.response_speech_text,
-  });
-  clients.forEach(client => {
-    try {
-      client.write(`data: ${payload}\n\n`);
-    } catch (e) {
-      console.error('[SSE] Error writing to a client, it might have disconnected abruptly:', e);
-    }
-  });
-  return {
-    content: [{ type: "text", text: "Response sent to UI via SSE." }],
-  };
-}
-
-// Helper function for ProcessAudioMode
-async function handleProcessAudioMode(
-  args: { audio_data: string; audio_input_type: string; speech_service_id: string; coding_assistant_id: string }
-): Promise<string> {
-  console.log(`[Tool Process] Process mode for coding_assistant_id: ${args.coding_assistant_id}`);
-  if (args.speech_service_id === "webspeech") {
-    console.log(`[Tool Process] Received pre-transcribed text (webspeech): "${args.audio_data}"`);
-    return args.audio_data;
-  } else {
-    console.log(`[Tool Process] Transcribing audio using ${args.speech_service_id} from ${args.audio_input_type}...`);
-    const transcribedText = `Placeholder: Server-side transcribed text for "${args.audio_data}"`; // Placeholder
-    console.log(`[Tool Process] Transcribed text: "${transcribedText}"`);
-    return transcribedText;
-  }
-}
-
-// Helper function for ListenMode
-async function handleListenMode(): Promise<string> {
-  console.log('[Tool Process] Listen mode activated. Waiting for transcribed text...');
-  if (resolveVoiceCommandPromise.current || rejectVoiceCommandPromise.current) {
-    throw new McpError(ErrorCode.InvalidRequest, "Another listen operation is already in progress.");
-  }
-  return new Promise<string>((resolve, reject) => {
-    resolveVoiceCommandPromise.current = resolve;
-    rejectVoiceCommandPromise.current = reject;
-    const listenTimeout = setTimeout(() => {
-      if (rejectVoiceCommandPromise.current) {
-        console.warn('[Tool Process] Listen mode timed out.');
-        rejectVoiceCommandPromise.current(new Error("Listen mode timed out after 60 seconds"));
-        resolveVoiceCommandPromise.current = null;
-        rejectVoiceCommandPromise.current = null;
-      }
-    }, 60000);
-
-    const originalResolve = resolveVoiceCommandPromise.current!;
-    const originalReject = rejectVoiceCommandPromise.current!;
-
-    resolveVoiceCommandPromise.current = (value) => {
-      clearTimeout(listenTimeout);
-      originalResolve(value);
-      resolveVoiceCommandPromise.current = null;
-      rejectVoiceCommandPromise.current = null;
-    };
-    rejectVoiceCommandPromise.current = (reason) => {
-      clearTimeout(listenTimeout);
-      originalReject(reason);
-      resolveVoiceCommandPromise.current = null;
-      rejectVoiceCommandPromise.current = null;
-    };
-  });
-}
-
-// Helper function to process transcribed text and formulate response to Cline
-async function processTranscribedTextAndRespond(
-  transcribedText: string,
-  coding_assistant_id: string,
-  output_format: string
-) {
-  console.log(`[Tool Process] Processing command for ${coding_assistant_id}: "${transcribedText}"`);
-  let assistantResponse: string;
-
-  if (coding_assistant_id === "cline") {
-    assistantResponse = transcribedText;
-  } else if (coding_assistant_id === "cline_mock") {
-    if (transcribedText.toLowerCase().includes("hello")) assistantResponse = "Hello from Restless Coder (mock)!";
-    else assistantResponse = `Restless Coder (mock) received: "${transcribedText}".`;
-  } else {
-    assistantResponse = `Unknown coding assistant (${coding_assistant_id}). Received: "${transcribedText}"`;
-  }
-  console.log(`[Tool Process] Assistant response (to be returned to Cline): "${assistantResponse}"`);
-
-  if (output_format === "audio") {
-    return { content: [{ type: "text", text: "Placeholder: Synthesized audio response." }] };
-  } else {
-    return { content: [{ type: "text", text: assistantResponse }] };
-  }
-}
 
 // Error handling
 server.onerror = (error) => console.error('[MCP Error]', error);
@@ -400,10 +444,10 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+main().catch((error: unknown) => {
   // This catch block handles errors from the main promise chain itself (e.g., if an await fails synchronously)
   // or if startHttpServer / server.connect rethrow errors not caught by their specific try/catch.
-  console.error("[Startup] Unhandled error during server startup:", error);
+  console.error("[Startup] Unhandled error during server startup:", error instanceof Error ? error.message : String(error), error instanceof Error ? error.stack : undefined);
   // Attempt to close http server if it might be running
   try {
     httpServer.close(() => {
