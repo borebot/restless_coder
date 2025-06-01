@@ -1,0 +1,1 @@
+Do not allow any data that references local file structures, secrets, api keys, or access tokens to be pushed to git. If these files exist, alert the user and add to .gitignore.
