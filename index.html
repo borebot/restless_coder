@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Restless Coder - Voice Client</title>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background-color: #f0f0f0; }
+        #controls { margin-bottom: 20px; }
+        #voiceButton { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+        #messages { width: 80%; max-width: 600px; min-height: 100px; border: 1px solid #ccc; background-color: #fff; padding: 10px; overflow-y: auto; }
+        .message { margin-bottom: 8px; padding: 5px; border-radius: 4px; }
+        .user-message { background-color: #e1f5fe; text-align: right; }
+        .assistant-message { background-color: #f1f8e9; }
+    </style>
+</head>
+<body>
+    <h1>Restless Coder - Voice MVP</h1>
+    <div id="controls">
+        <button id="voiceButton">Start Listening</button>
+    </div>
+    <div id="messages">
+        <p><em>Click "Start Listening" and speak your command.</em></p>
+    </div>
+
+    <script>
+        const voiceButton = document.getElementById('voiceButton');
+        const messagesDiv = document.getElementById('messages');
+        let listening = false;
+
+        // Check for browser support
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const speechSynthesis = window.speechSynthesis;
+
+        if (!SpeechRecognition) {
+            addMessage('Your browser does not support Speech Recognition. Please try Chrome or Edge.', 'assistant-message');
+            voiceButton.disabled = true;
+        }
+        if (!speechSynthesis) {
+            addMessage('Your browser does not support Speech Synthesis.', 'assistant-message');
+        }
+
+        const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+        if (recognition) {
+            recognition.continuous = false; // Process single utterances
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+        }
+
+        function addMessage(text, className) {
+            // Remove initial placeholder message if it exists
+            const placeholder = messagesDiv.querySelector('p > em');
+            if (placeholder) {
+                placeholder.parentElement.remove();
+            }
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message', className);
+            messageElement.textContent = text;
+            messagesDiv.appendChild(messageElement);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight; // Scroll to bottom
+        }
+
+        function speak(text) {
+            if (!speechSynthesis || !text) return;
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'en-US';
+            speechSynthesis.speak(utterance);
+        }
+
+        async function sendToServer(text) {
+            addMessage(`You said: "${text}"`, 'user-message');
+
+            const mcpPayload = {
+                toolName: "process_voice_command",
+                arguments: {
+                    audio_input_type: "text", // Since STT is done client-side by WebSpeech
+                    audio_data: text,
+                    speech_service_id: "webspeech",
+                    coding_assistant_id: "cline", // Changed from cline_mock for testing
+                    output_format: "text"
+                }
+            };
+
+            console.log('--- Intended MCP Call ---');
+            console.log('Server: restless_coder');
+            console.log('Tool: process_voice_command');
+            console.log('Arguments:', JSON.stringify(mcpPayload.arguments, null, 2));
+            console.log('--------------------------');
+            
+            // For MVP, we'll continue to mock the server response directly in the client
+            // to allow standalone testing of the voice interface.
+            // In a full integration (e.g., within a VS Code webview),
+            // this is where you'd use vscode.postMessage or similar to send to the extension,
+            // which then calls the MCP server.
+
+            let assistantResponse = "";
+            // Mocking server's logic based on the updated restless_coder/src/index.ts
+
+            const assistantId = mcpPayload.arguments.coding_assistant_id;
+            const commandText = mcpPayload.arguments.audio_data;
+
+            if (assistantId === "cline") {
+                // The actual server now returns the transcribed text itself for "cline"
+                assistantResponse = `(Server would return this text for Cline to process: "${commandText}")`;
+                // To make the client still "speak" something useful in this mock:
+                // speak(`Okay, sending "${commandText}" to Cline.`); // This would be a client-side action
+            } else if (assistantId === "cline_mock") {
+                // This logic matches the server's cline_mock
+                const lowerCommand = commandText.toLowerCase();
+                if (lowerCommand.includes("hello") || lowerCommand.includes("hi")) {
+                    assistantResponse = "Hello from Restless Coder (mock)! How can I assist you today?";
+                } else if (lowerCommand.includes("what time is it")) {
+                    assistantResponse = `The current time is ${new Date().toLocaleTimeString()} (mock).`;
+                } else if (lowerCommand.includes("create a file named test.txt")) {
+                    assistantResponse = "Okay, I'll create a file named test.txt. (Mocked action from cline_mock)";
+                } else {
+                    assistantResponse = `Restless Coder (mock) received: "${commandText}".`;
+                }
+            } else {
+                assistantResponse = `Unknown coding assistant (${assistantId}). Received: "${commandText}"`;
+            }
+
+            addMessage(assistantResponse, 'assistant-message');
+            // Speak the actual response that the user would hear
+            // If it was a real call to "cline", the response spoken here would be Cline's actual response,
+            // not the passthrough text. For this mock, we speak the generated assistantResponse.
+            speak(assistantResponse); 
+        }
+
+        if (recognition) {
+            recognition.onstart = () => {
+                listening = true;
+                voiceButton.textContent = 'Listening...';
+                voiceButton.disabled = true;
+                addMessage('Listening...', 'assistant-message');
+            };
+
+            recognition.onresult = (event) => {
+                const transcript = event.results[0][0].transcript;
+                sendToServer(transcript);
+            };
+
+            recognition.onerror = (event) => {
+                addMessage(`Speech recognition error: ${event.error}`, 'assistant-message');
+                console.error('Speech recognition error:', event);
+            };
+
+            recognition.onend = () => {
+                listening = false;
+                voiceButton.textContent = 'Start Listening';
+                voiceButton.disabled = false;
+                 // Remove "Listening..." message if it's the last one
+                const lastMessage = messagesDiv.lastChild;
+                if (lastMessage && lastMessage.textContent === 'Listening...' && lastMessage.classList.contains('assistant-message')) {
+                    lastMessage.remove();
+                }
+            };
+        }
+
+        voiceButton.addEventListener('click', () => {
+            if (!recognition) return;
+            if (listening) {
+                recognition.stop();
+            } else {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    addMessage('Could not start recognition: ' + e.message, 'assistant-message');
+                    console.error("Error starting recognition:", e);
+                }
+            }
+        });
+
+        // Initial message
+        if (messagesDiv.children.length === 1 && messagesDiv.firstElementChild.tagName === 'P') {
+             // Keep initial message if no errors
+        } else if (!SpeechRecognition || !speechSynthesis) {
+            // Errors already added
+        }
+        else {
+            addMessage('Click "Start Listening" and speak your command.', 'assistant-message');
+        }
+
+    </script>
+</body>
+</html>

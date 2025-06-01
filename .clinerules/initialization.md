@@ -1,0 +1,1 @@
+read the dev diary and readme at the beginning of a task. when updating the diary, do not refer to my local filesystem structure. do not write any information unique to my system, my api keys, or local rules.
