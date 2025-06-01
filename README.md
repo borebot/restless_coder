@@ -3,9 +3,11 @@
 NOTE: THIS IS PRE-RELEASE; STILL IMPLEMENTING CORE FUNCTIONS AS OF 6/1/2025
 
 
-**MCP server for voice interaction with coding assistants.**
+**MCP server for voice interaction with coding assistants. Currently built for use with Cline, but may extend later.**
 
-This server provides a tool (`process_voice_command`) that enables users to interact with various coding assistants using voice commands. It aims to make the development workflow more natural by allowing voice input for commands and potentially voice-based approval for code changes or actions.
+This server provides a tool (`process_voice_command`) that enables users to interact with Cline using voice commands. It aims to make the development workflow more natural by allowing voice input for commands and potentially voice-based approval for code changes or actions.
+
+Note: for use with Cline, you need to set your auto-approve rules to encompass every command you expect to activate by voice. You can keep your auto-approve limited if you don't mind physically clicking approve. I would recommend allowing auto-approval of restless_coder actions, however, as the interaction loop will automatically call restless_coder after every action, until the user tells it to stop the tool/protocol.
 
 ## Features
 
