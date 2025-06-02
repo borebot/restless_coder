@@ -4,47 +4,351 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Restless Coder - Voice Client</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background-color: #f0f0f0; }
-        #controls { margin-bottom: 10px; } /* Adjusted margin */
-        #voiceButton { padding: 10px 20px; font-size: 16px; cursor: pointer; margin-bottom: 10px; } /* Added margin */
-        #voiceControls { margin-bottom: 20px; display: flex; align-items: center; }
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Poppins', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            background-color: #1a1a1a; /* Darker background */
+            color: #e0e0e0; /* Lighter base text color */
+        }
+
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding-bottom: 100px; /* Space for fixed bottom controls, adjust as needed */
+        }
+
+        header {
+            padding: 20px;
+            text-align: center;
+            background-color: #222; /* Slightly lighter than body for depth */
+            border-bottom: 1px solid #333; /* Subtle separator */
+            z-index: 10;
+            position: relative;
+        }
+        header h1 { 
+            margin: 0 0 15px 0; 
+            font-size: 1.8em; 
+            font-weight: 600;
+            color: #fff; /* Pure white for title */
+        }
+        #controls { margin-bottom: 10px; }
+        #voiceButton { 
+            padding: 15px 30px; /* Increased padding */
+            font-size: 1.3em; /* Adjusted font size to 1.3x original */
+            cursor: pointer; 
+            background-color: #007bff; /* Brighter blue for primary action */
+            color: #fff; 
+            border: none; 
+            border-radius: 5px; 
+            transition: background-color 0.3s ease;
+        }
+        #voiceButton:hover {
+            background-color: #0056b3; /* Darker blue on hover */
+        }
+        #voiceControls { 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            font-size: 0.9em; 
+            color: #bbb; /* Lighter grey for secondary controls */
+        }
         #voiceControls label { margin-right: 10px; }
-        #messages { width: 80%; max-width: 600px; min-height: 100px; border: 1px solid #ccc; background-color: #fff; padding: 10px; overflow-y: auto; }
-        .message { margin-bottom: 8px; padding: 5px; border-radius: 4px; }
-        .user-message { background-color: #e1f5fe; text-align: right; }
-        .assistant-message { background-color: #f1f8e9; }
-        #copyPrompt { margin-top: 10px; font-size: 0.9em; color: #555;}
+        #voiceSelect { 
+            background-color: #333; 
+            color: #e0e0e0; 
+            border: 1px solid #555; 
+            border-radius: 4px; 
+            padding: 5px 8px;
+        }
+
+        #fullpage-slides {
+            flex-grow: 1;
+            overflow-y: auto; 
+            /* scroll-snap-type: y mandatory; Removed for multi-slide view */
+            /* height: 100%; Removed as flex-grow: 1 and min-height: 0 should handle it */
+            min-height: 0; /* Allows the element to shrink properly in flex container */
+            padding-top: 20px; /* Space from header */
+        }
+
+        .slide {
+            height: auto; 
+            min-height: 0; /* Allow content to fully dictate height */
+            width: 90%; 
+            max-width: 1000px; 
+            margin: 0 auto 20px auto; 
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding: 15px 30px; /* Reduced vertical padding, keep horizontal */
+            box-sizing: border-box;
+            opacity: 1; /* Slide container itself is visible, text will be animated */
+            position: relative;
+            /* background-color: #282828; Removed for invisible box */
+            /* border-radius: 8px; Removed */
+            /* box-shadow: 0 4px 15px rgba(0,0,0,0.3); Removed */
+        }
+        
+        .slide-content { 
+            width: 100%; 
+            text-align: left; /* Align text to left for readability */
+            line-height: 1.6; /* Improved line spacing */
+            font-size: clamp(28px, 3.5vw, 42px); /* Increased message text size by 1.75x */
+        }
+
+        .user-message .slide-content { color: #81c784; /* Softer Green */ }
+        .assistant-message .slide-content { color: #64b5f6; /* Softer Blue */ }
+        
+        #copyPrompt { 
+            font-size: 0.85em; 
+            color: #999; 
+            text-align: center; 
+            padding: 15px;
+            background-color: #222; /* Match header bg */
+            border-top: 1px solid #333; /* Subtle separator */
+            z-index: 10; 
+            position: relative;
+        }
+        #bottom-controls {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            padding: 20px;
+            text-align: center;
+            background-color: #222; /* Match header/copyPrompt bg */
+            border-top: 1px solid #333; /* Subtle separator */
+            z-index: 100; /* Ensure it's above other content */
+        }
     </style>
 </head>
 <body>
-    <h1>Restless Coder - Voice Client</h1>
-    <div id="controls">
-        <button id="voiceButton">Start Listening</button>
+    <div id="app-container">
+        <header>
+            <h1>Restless Coder</h1>
+            <div id="voiceControls">
+                <label for="voiceSelect">Assistant voice:</label>
+                <select id="voiceSelect"></select>
+            </div>
+        </header>
+
+        <div id="fullpage-slides">
+            <!-- Slides will be dynamically added here by JavaScript -->
+            <!-- Example initial slide (optional, can be added by JS) -->
+            <section class="slide" id="initial-slide" style="opacity: 1;">
+                 <div class="slide-content">
+                    <p><em>Click "Start Listening" and speak your command.</em></p>
+                </div>
+            </section>
+        </div>
+        
+        <div id="copyPrompt">Transcribed text will be sent to the server automatically.</div>
+
+        <div id="bottom-controls">
+            <button id="voiceButton">Record Message</button>
+        </div>
     </div>
-    <div id="voiceControls">
-        <label for="voiceSelect">Choose an assistant voice:</label>
-        <select id="voiceSelect"></select>
-    </div>
-    <div id="messages">
-        <p><em>Click "Start Listening" and speak your command.</em></p>
-    </div>
-    <p id="copyPrompt">Transcribed text will be sent to the server automatically.</p>
 
     <script type="module">
-        import { initializeUiElements } from './uiUtils.js';
+        import { initializeUiElements, addMessage } from './uiUtils.js'; // Import addMessage
         import { initializeSpeechRecognition } from './speechRecognition.js';
         import { initializeTextToSpeech } from './textToSpeech.js';
         import { initializeSseClient } from './sseClient.js';
 
         document.addEventListener('DOMContentLoaded', () => {
-            initializeUiElements(); // Initialize DOM elements first
+            initializeUiElements(); 
             initializeSpeechRecognition();
             initializeTextToSpeech();
-            initializeSseClient();
 
-            // The initial placeholder message is part of the HTML.
-            // Browser capability messages are handled by the respective initialize functions.
+            let animationQueue = [];
+            let isAnimating = false;
+
+            function processAnimationQueue() {
+                if (isAnimating || animationQueue.length === 0) {
+                    return;
+                }
+                isAnimating = true;
+                const slideToAnimate = animationQueue.shift();
+
+                const slideContent = slideToAnimate.querySelector('.slide-content');
+                // Ensure slideToAnimate is still in the DOM, e.g. not removed by other logic
+                if (!document.body.contains(slideToAnimate)) {
+                    isAnimating = false;
+                    processAnimationQueue();
+                    return;
+                }
+                
+                if (slideContent && !slideToAnimate.dataset.animated) {
+                    if (slideToAnimate.id === 'initial-slide' && !slideContent.querySelector('span')) {
+                        slideToAnimate.style.opacity = '1';
+                        slideToAnimate.dataset.animated = 'true';
+                        isAnimating = false;
+                        processAnimationQueue();
+                        return;
+                    }
+
+                    const chars = slideContent.querySelectorAll('span');
+                    if (chars.length > 0) {
+                        const numChars = chars.length;
+                        const targetOverallDurationMs = 750;
+                        const baseIndividualCharAnimDurationMs = 200; // Default duration for one char to fade (increased from 100ms)
+                        const minSpeedCharsPerSec = 20;
+                        const practicalMinStaggerMs = 5; // Smallest practical stagger
+
+                        let charAnimDuration = baseIndividualCharAnimDurationMs; // This will be the final duration used in anime.add
+                        let staggerDelay; // This will be the final stagger used
+
+                        // numChars is guaranteed > 0 by the outer if (chars.length > 0)
+
+                        if (numChars === 1) {
+                            staggerDelay = 0;
+                            const durationForMinSpeed = Math.ceil(1000 / minSpeedCharsPerSec); // e.g., 50ms for 20cps
+                            // Effective duration for a single char:
+                            // Must be AT MOST durationForMinSpeed (to meet minSpeed)
+                            // Must be AT MOST baseIndividualCharAnimDurationMs (our preferred individual char anim time)
+                            // Must be AT MOST targetOverallDurationMs (overall message time limit)
+                            charAnimDuration = Math.min(baseIndividualCharAnimDurationMs, durationForMinSpeed, targetOverallDurationMs);
+                        } else { // numChars >= 2
+                            // Stagger calculated to fit within targetOverallDurationMs, using current charAnimDuration (which is baseIndividualCharAnimDurationMs here)
+                            let staggerForTargetDuration = 0;
+                            if (targetOverallDurationMs - charAnimDuration > 0 && (numChars - 1) > 0) { // Ensure valid division
+                                staggerForTargetDuration = Math.floor((targetOverallDurationMs - charAnimDuration) / (numChars - 1));
+                            }
+                            
+                            // Stagger calculated to achieve at least minSpeedCharsPerSec
+                            const timeBudgetPerCharForMinSpeedMs = Math.ceil(1000 / minSpeedCharsPerSec); // 50ms
+                            const totalTimeAllowedByMinSpeed = numChars * timeBudgetPerCharForMinSpeedMs;
+                            
+                            let staggerForMinSpeed = 0;
+                            if (totalTimeAllowedByMinSpeed - charAnimDuration > 0 && (numChars - 1) > 0) { // Ensure valid division
+                                staggerForMinSpeed = Math.floor((totalTimeAllowedByMinSpeed - charAnimDuration) / (numChars - 1));
+                            }
+                            
+                            // If the stagger required for 750ms target (staggerForTargetDuration)
+                            // is larger than the stagger required for 20cps (staggerForMinSpeed),
+                            // it means the 750ms target is "too slow" (i.e., speed < 20cps).
+                            // In this case, use the 20cps-derived stagger (staggerForMinSpeed), which will be smaller/faster.
+                            if (staggerForTargetDuration > staggerForMinSpeed) {
+                                staggerDelay = staggerForMinSpeed;
+                            } else {
+                                staggerDelay = staggerForTargetDuration;
+                            }
+                            
+                            staggerDelay = Math.max(practicalMinStaggerMs, staggerDelay); // Ensure practical minimum
+                        }
+                        
+                        anime.timeline({
+                            targets: chars,
+                            easing: 'easeOutExpo',
+                            complete: () => {
+                                slideToAnimate.dataset.animated = 'true';
+                                isAnimating = false;
+                                processAnimationQueue();
+                            }
+                        })
+                        .add({
+                            opacity: [0, 1],
+                            duration: charAnimDuration, 
+                            delay: anime.stagger(staggerDelay)
+                        });
+                    } else { 
+                        anime({
+                            targets: slideToAnimate,
+                            opacity: [0,1], // Should target slideContent or its children if slide is already opacity 1
+                            duration: 700,
+                            easing: 'easeOutExpo',
+                            complete: () => {
+                                slideToAnimate.dataset.animated = 'true';
+                                isAnimating = false;
+                                processAnimationQueue();
+                            }
+                        });
+                    }
+                } else {
+                    isAnimating = false;
+                    processAnimationQueue();
+                }
+            }
+            
+            initializeSseClient((text, className) => {
+                const newSlide = addMessage(text, className); 
+                if (newSlide) {
+                    // New slides are added to the end of the queue
+                    animationQueue.push(newSlide);
+                    processAnimationQueue();
+                }
+            });
+
+            const slideObserverOptions = {
+                root: document.getElementById('fullpage-slides'),
+                rootMargin: '0px',
+                threshold: 0.5 
+            };
+
+            const slideObserver = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting && !entry.target.dataset.animated) {
+                        // If a slide scrolls into view and isn't animated,
+                        // add it to the front of the queue to prioritize it,
+                        // but only if it's not already in the queue.
+                        if (!animationQueue.some(item => item.element === entry.target)) {
+                             // Check if it's already being processed or queued
+                            let alreadyQueued = false;
+                            for(let i=0; i < animationQueue.length; i++){
+                                if(animationQueue[i] === entry.target){
+                                    alreadyQueued = true;
+                                    break;
+                                }
+                            }
+                            if(!alreadyQueued){
+                                animationQueue.unshift(entry.target); 
+                            }
+                        }
+                        processAnimationQueue();
+                    }
+                });
+            }, slideObserverOptions);
+
+            const slidesContainer = document.getElementById('fullpage-slides');
+            if (slidesContainer) {
+                const initialSlides = slidesContainer.querySelectorAll('.slide');
+                initialSlides.forEach(slide => {
+                    // Don't add initial slide to animation queue if it's already visible by default
+                    if (slide.id === 'initial-slide' && slide.style.opacity === '1') {
+                        slide.dataset.animated = 'true'; // Mark as "animated" to prevent re-processing
+                    } else {
+                        slideObserver.observe(slide);
+                    }
+                });
+
+                const mutationObserver = new MutationObserver(mutations => {
+                    mutations.forEach(mutation => {
+                        mutation.addedNodes.forEach(node => {
+                            if (node.nodeType === 1 && node.classList.contains('slide')) {
+                                // New slides added by SSE are handled by initializeSseClient pushing to queue.
+                                // Observer will pick them up if they scroll into view later and weren't animated.
+                                // However, if they are added and immediately visible, observer might trigger.
+                                // The `dataset.animated` check in processAnimationQueue should prevent double animation.
+                                slideObserver.observe(node);
+                            }
+                        });
+                    });
+                });
+                mutationObserver.observe(slidesContainer, { childList: true });
+            }
+            
         });
     </script>
 </body>

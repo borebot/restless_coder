@@ -317,7 +317,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   } else if (request.params.name === "get_voice_interaction_protocol") {
     try {
       const protocolFileName = 'voice_interaction_protocol.md';
-      const protocolPath = path.join(__dirname_esm, '..', '.clinerules', protocolFileName);
+      const protocolPath = path.join(__dirname_esm, '..', '.clinerules', '.clinerules', protocolFileName);
 
       if (!fs.existsSync(protocolPath)) {
           console.error(`[Tool get_voice_interaction_protocol] Protocol file not found at: ${protocolPath}`);
@@ -327,7 +327,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const protocolContent = fs.readFileSync(protocolPath, 'utf-8');
       console.log(`[Tool get_voice_interaction_protocol] Successfully read protocol file from ${protocolPath}.`);
       return {
-        content: [{ type: "json", data: { protocol_content: protocolContent } }]
+        content: [{ type: "text", text: protocolContent }]
       };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -406,9 +406,9 @@ function startHttpServer(port: number): Promise<void> {
     };
     httpServer.once('error', startupErrorListener);
 
-    httpServer.listen(port, () => {
+    httpServer.listen(port, '0.0.0.0', () => {
       httpServer.removeListener('error', startupErrorListener); // Clean up: only listen for startup errors once
-      console.error(`[HTTP Server] UI available at http://localhost:${port}`);
+      console.error(`[HTTP Server] UI available at http://0.0.0.0:${port} (accessible on your local network)`);
       resolve();
     });
   });

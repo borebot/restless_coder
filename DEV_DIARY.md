@@ -352,3 +352,271 @@
 *   All identified TypeScript errors in `src/index.ts` have been resolved.
 *   The project builds successfully.
 *   The voice interaction protocol, including listening for commands and sending responses to the UI, is functional.
+
+## 2025-06-02: MCP Connection Troubleshooting and Protocol Test
+
+**Objective:** Resolve persistent "Not connected" errors when Cline attempted to use the `restless_coder` MCP server, and subsequently test the voice interaction protocol.
+
+**Steps Taken:**
+
+1.  **Initial Diagnosis:**
+    *   Cline reported "Not connected" when trying to use `process_voice_command` from the `restless_coder` server.
+    *   Verified the server process started successfully (logged `[MCP Server] Restless Coder MCP server running on stdio`).
+    *   Checked `cline_mcp_settings.json` and confirmed the path to `build/index.js` for `restless_coder` was correct.
+
+2.  **MCP Inspector Usage:**
+    *   Ran the `restless_coder` server via `npm run inspector`.
+    *   When Cline attempted to connect (either via `process_voice_command` or `mcp_list_tools`), the MCP Inspector showed no incoming connection attempts or activity related to `restless_coder`.
+
+3.  **Comparative Test:**
+    *   Successfully used another configured MCP server (Brave Search) via Cline, indicating Cline's general MCP client functionality was working. This pointed to an issue specific to how Cline was handling the `restless_coder` configuration.
+
+4.  **Configuration Refresh:**
+    *   Hypothesized that Cline might have a stale or corrupted internal representation of the `restless_coder` server configuration.
+    *   Guided the user to effectively "reinstall" the server configuration in `cline_mcp_settings.json`:
+        *   The user deleted the `restless_coder` entry from the JSON file (simulating removal via a UI).
+        *   The `restless_coder` entry was then programmatically added back to `cline_mcp_settings.json`.
+        *   VS Code was restarted to ensure Cline re-read its settings.
+
+5.  **Successful Connection and Protocol Test:**
+    *   After the configuration refresh and VS Code restart, with the `restless_coder` server running via `npm run inspector`:
+        *   Cline successfully connected to the `restless_coder` server.
+        *   The voice interaction protocol was initiated.
+        *   Cline entered "listen" mode.
+        *   User provided the voice command "hi testing testing Can You Hear Me" via the web UI (`http://localhost:6543`).
+        *   The command was transcribed, sent to the server, and relayed to Cline.
+        *   Cline responded "Yes, I hear you loud and clear!", which was successfully sent to the UI via SSE for display and speech.
+        *   Cline re-entered "listen" mode.
+        *   User provided the voice command "play the protocol for now" (interpreted as "end the protocol").
+        *   The command was processed, and Cline responded "Okay, I will end the voice interaction protocol for now.", which was sent to the UI.
+        *   The voice protocol was then ended.
+
+**Current Status:**
+*   The "Not connected" issue with the `restless_coder` MCP server has been resolved. The root cause appeared to be related to Cline's internal handling of the server configuration, which was fixed by removing and re-adding the configuration.
+*   The full voice interaction protocol, including Cline listening, receiving commands from the UI, processing them, and sending spoken/displayed responses back to the UI, is confirmed to be functional.
+*   The MCP Inspector was a key tool in diagnosing that Cline was not even attempting to launch the server process initially.
+
+## 2025-06-02 (Part 2): UI Enhancements for Voice Client
+
+**Objective:** Improve the user interface (`ui/index.html`) for the voice client, focusing on message display order, visual aesthetics, and text animation.
+
+**Steps Taken:**
+
+1.  **Reverse Chronological Order & Scrolling:**
+    *   Modified `ui/uiUtils.js` (`addMessage` function) to prepend new message slides to the top of the container, instead of appending.
+    *   Initially, `scrollIntoView({ behavior: 'smooth', block: 'start' })` was used in `ui/index.html` to scroll to new messages. This was later removed as prepending achieved the desired effect.
+    *   Addressed an issue where the page scrolled to the bottom on new message receipt by implementing scroll position preservation in `ui/uiUtils.js` (capturing `scrollTop` and `scrollHeight` before prepending, then adjusting `scrollTop` after).
+    *   Finally, to ensure the newest message is always at the very top of the viewport, the scroll preservation was replaced with a direct `fullpageSlidesDiv.scrollTop = 0;` in `ui/uiUtils.js` after a new message is added.
+
+2.  **Visual Styling (Inspired by animejs.com):**
+    *   Updated CSS in `ui/index.html`:
+        *   Changed font to 'Inter' and a system font stack.
+        *   Implemented a darker background theme (`#1a1a1a`) with refined accent colors for user/assistant messages (`#81c784`, `#64b5f6`).
+        *   Restyled the header, title, and controls for a cleaner, more modern look.
+        *   Message slide containers (`.slide`) were initially styled as cards, then later made "invisible" (transparent background, no border/shadow) with height determined by content. Padding was adjusted.
+    *   Removed `scroll-snap-type` and adjusted `min-height` on `.slide` elements to allow multiple messages to be visible in the viewport.
+
+3.  **Character-by-Character Fade-In Animation:**
+    *   Modified `ui/uiUtils.js` (`addMessage` function) to wrap each character of the incoming text in a `<span>` element with `style="opacity: 0;"`.
+    *   Updated the `IntersectionObserver` logic in `ui/index.html` to target these character `<span>`s.
+    *   Used `anime.js` with `timeline` and `stagger` to make characters fade in sequentially.
+        *   Initial animation parameters: `duration: 50`, `delay: anime.stagger(50)`.
+        *   Adjusted for a "waterfall" effect: `duration: 250`, `delay: anime.stagger(25)`.
+    *   Removed a call to `adjustFontSizeToFit` in `ui/uiUtils.js` as it was resetting `innerHTML` and breaking the character `<span>` structure needed for animation.
+
+4.  **Sequential Animation for Rapid Messages:**
+    *   Implemented an animation queue in `ui/index.html` to handle messages arriving in rapid succession.
+    *   Introduced `animationQueue` array and `isAnimating` flag.
+    *   Created `processAnimationQueue()` function to manage sequential animation of messages. Each animation's `complete` callback triggers the next in the queue.
+    *   Both new SSE messages and slides scrolled into view via `IntersectionObserver` are added to this queue.
+
+**Current Status:**
+*   The voice client UI now displays messages in reverse chronological order, with the newest message at the top and the view scrolled to the top.
+*   Visuals are updated with a modern dark theme.
+*   Message containers are invisible, sized by content, and allow multiple messages to be viewed.
+*   Messages fade in character-by-character with a "waterfall" effect.
+*   An animation queue ensures messages animate sequentially, even if received rapidly.
+*   The UI is significantly more polished and user-friendly.
+
+## 2025-06-02 (Part 3): Further UI Refinements (Font, Sizing, Animation)
+
+**Objective:** Implement additional user-requested refinements to the voice client UI, focusing on font, dynamic text sizing, message prefaces, and animation speed controls.
+
+**Steps Taken:**
+
+1.  **Font Change and Dynamic Sizing:**
+    *   Modified `ui/index.html` to import and use the "Poppins" font via Google Fonts.
+    *   Updated the CSS for `.slide-content` to use `font-size: clamp(16px, 2.0vw, 24px);`, making the font size responsive to window width while maintaining readability within a defined range (initially `clamp(14px, 1.6vw, 20px)`, then increased).
+
+2.  **User Message Preface Removal:**
+    *   Modified `ui/speechRecognition.js` in the `handleTranscription` function.
+    *   Changed `addMessage(\`You said: "${text}"\`, 'user-message');` to `addMessage(text, 'user-message');` to remove both the "You said: " preface and the surrounding quotation marks from the display of user's transcribed speech. Assistant messages retain their prefaces.
+
+3.  **Animation Speed Adjustments:**
+    *   Modified the JavaScript animation logic in `ui/index.html` within the `processAnimationQueue` function.
+    *   The `baseIndividualCharAnimDurationMs` (duration for a single character to fade in) was increased from 100ms to 200ms to make the individual character fade-in appear slower.
+    *   The logic for calculating `staggerDelay` and `charAnimDuration` was updated to meet two primary conditions:
+        1.  The total animation for a message aims to complete within approximately 750 milliseconds.
+        2.  The animation speed should not drop below a minimum of 20 characters per second. If the 750ms target would result in a speed below 20cps, the animation parameters are adjusted to maintain 20cps, potentially exceeding the 750ms total duration for very long messages.
+    *   For single-character messages, `charAnimDuration` is specially calculated to try and meet the 20cps speed (i.e., animate in 50ms or less if the base duration was longer).
+    *   A practical minimum stagger delay (e.g., 5ms) is maintained.
+
+**Current Status:**
+*   The UI uses the "Poppins" font with dynamic sizing.
+*   User messages are displayed without any preface or quotes.
+*   The character-by-character animation has a slower individual character fade-in and dynamically adjusts its overall speed based on message length, a target total duration, and a minimum characters-per-second rate.
+*   The voice interaction protocol was briefly tested with these UI changes.
+
+## 2025-06-02 (Part 4): Mobile Client Connectivity Fix
+
+**Objective:** Resolve an issue where the voice client UI (`ui/index.html`), when accessed from a mobile device on the local network, could receive messages from the server but could not submit transcribed text back to the server.
+
+**Steps Taken:**
+
+1.  **Problem Diagnosis:**
+    *   User reported that submitting text from a mobile device resulted in a "network error: could not submit text. Is the server running?" message, even though the server was running and accessible (SSE messages were being received by the mobile client).
+    *   Hypothesized that the server might only be listening on `localhost` (127.0.0.1), or the client might be hardcoding `localhost` in its request URL.
+
+2.  **Server-Side Modification (`src/index.ts`):**
+    *   Reviewed `src/index.ts` and found that the HTTP server's `listen` call did not specify a hostname, defaulting to `localhost`.
+    *   Modified the `httpServer.listen(port, ...)` call within the `startHttpServer` function to `httpServer.listen(port, '0.0.0.0', ...)`. This makes the server listen on all available network interfaces, allowing connections from other devices on the local network.
+    *   Updated the console log message to reflect the change: `[HTTP Server] UI available at http://0.0.0.0:${port} (accessible on your local network)`.
+    *   Rebuilt the project using `npm run build` to apply these changes.
+
+3.  **Client-Side Modification (`ui/speechRecognition.js`):**
+    *   Reviewed `ui/speechRecognition.js` and found that the `fetch` request to `/submit-transcribed-text` was hardcoded to `http://localhost:6543/submit-transcribed-text`.
+    *   Changed the URL in the `fetch` call to a relative path: `'/submit-transcribed-text'`. This ensures the client sends the request to the same host and port from which the `index.html` page was served.
+
+4.  **Testing and Verification:**
+    *   After restarting the server and clearing the mobile browser cache:
+        *   The voice interaction protocol was initiated.
+        *   The user successfully submitted a voice command ("can you hear me now") from the mobile device.
+        *   Cline received the command and responded, confirming the fix.
+
+**Current Status:**
+*   The mobile client connectivity issue is resolved. The voice client UI can now successfully submit transcribed text to the server when accessed from a mobile device on the local network.
+*   The server listens on `0.0.0.0`, and the client uses a relative path for API requests.
+*   The voice interaction protocol remains fully functional with these fixes.
+
+## 2025-06-02 (Part 5): Add "Processing..." Indicator to UI
+
+**Objective:** Enhance the voice client UI to display a "Processing..." message after a user's command is sent and remove it when the assistant's response is received.
+
+**Steps Taken:**
+
+1.  **Shared State for Processing Message (`ui/uiUtils.js`):**
+    *   Added an exported variable `currentProcessingSlide` initialized to `null`. This will hold a reference to the DOM element of the "Processing..." message.
+    *   Modified the `addMessage` function to recognize a `className` containing `processing-indicator`. If found, it adds `system-message` and `processing-indicator` classes to the slide.
+
+2.  **Displaying "Processing..." Message (`ui/speechRecognition.js`):**
+    *   Imported `currentProcessingSlide` (aliased as `processingSlideRef`) from `ui/uiUtils.js`.
+    *   In the `handleTranscription` function, after the user's message is added to the UI:
+        *   Any existing `processingSlideRef.current` is defensively removed from the DOM.
+        *   A new message "Processing..." is added using `addMessage("Processing...", "system-message processing-indicator")`.
+        *   The returned DOM element from `addMessage` is stored in `processingSlideRef.current`.
+
+3.  **Removing "Processing..." Message (`ui/sseClient.js`):**
+    *   Imported `currentProcessingSlide` (aliased as `processingSlideRef`) from `ui/uiUtils.js`.
+    *   In the `evtSource.onmessage` handler (which processes incoming SSE messages from the server):
+        *   Before adding the assistant's actual response message to the UI, it checks if `processingSlideRef.current` exists and is part of the DOM.
+        *   If it exists, `processingSlideRef.current.remove()` is called to remove the "Processing..." message.
+        *   `processingSlideRef.current` is then set back to `null`.
+
+**Current Status:**
+*   The UI now displays a "Processing..." message immediately after the user's transcribed command is shown.
+*   This "Processing..." message is removed from the UI just before the assistant's response is displayed.
+*   This provides better visual feedback to the user about the state of their command.
+*   Client-side changes only; no server rebuild required. User needs to clear browser cache and reload the UI page.
+
+## 2025-06-02 (Part 6): UI Bug Fixing ("Malformed Message" and "Processing..." Indicator)
+
+**Objective:** Resolve UI bugs reported after implementing the "Processing..." indicator, specifically a "received malformed message from server" error and issues with the "Processing..." message display.
+
+**Steps Taken:**
+
+1.  **Diagnosis of "Malformed Message" and "Processing..." Indicator Issues:**
+    *   User reported seeing "received malformed message from server" upon opening the UI.
+    *   User also reported no indication of voice input going through (potentially related to the "Processing..." message).
+    *   The "malformed message" error in `ui/sseClient.js` was generic. The initial SSE connection message from the server (`{"type":"connection_established",...}`) was valid JSON but did not contain `displayText` or `speechText`, which the client was implicitly expecting for all messages.
+    *   A key issue was identified in `ui/uiUtils.js`: `currentProcessingSlide` was exported as `null`, but `ui/speechRecognition.js` and `ui/sseClient.js` were attempting to use it as an object with a `.current` property (e.g., `processingSlideRef.current`). This would cause a runtime error when trying to set or access `.current` on `null`.
+
+2.  **Fixing `currentProcessingSlide` Handling:**
+    *   Modified `ui/uiUtils.js`: Changed the declaration of `currentProcessingSlide` from `export let currentProcessingSlide = null;` to `export let currentProcessingSlide = { current: null };`. This aligns its structure with how it was being used in other modules.
+
+3.  **Refining SSE Message Handling (`ui/sseClient.js`):**
+    *   Updated the `evtSource.onmessage` handler:
+        *   It now first attempts to `JSON.parse(event.data)`. If this fails, it logs an error and returns, preventing the "malformed message" from being displayed in the UI for actual JSON parsing errors.
+        *   It explicitly checks if `data.type === "connection_established"`. If so, it logs a confirmation to the console and returns, preventing this initial, valid server message from being treated as a displayable chat message or an error.
+        *   The logic to remove `processingSlideRef.current` was confirmed to be correctly placed after these initial checks and before processing a displayable assistant message.
+        *   Added a console warning if an SSE message is received that is valid JSON but has no `displayText`, `speechText`, and isn't the `connection_established` type.
+
+**Current Status:**
+*   The `currentProcessingSlide` variable in `ui/uiUtils.js` is now correctly structured as an object, resolving potential runtime errors in `ui/speechRecognition.js` and `ui/sseClient.js` when accessing its `.current` property. This should fix the "Processing..." indicator logic.
+*   The SSE client in `ui/sseClient.js` now handles the initial server connection message gracefully, preventing the "received malformed message from server" error from appearing in the UI for that specific event.
+*   These changes are client-side only and require a browser cache clear and page reload to take effect.
+
+## 2025-06-02 (Part 7): Refine UI Feedback for Listening and Submission States
+
+**Objective:** Further improve the voice client UI by managing the "Listening..." message display and removing the explicit "Server: text submitted successfully" confirmation, based on user feedback.
+
+**Steps Taken:**
+
+1.  **Add `currentListeningSlide` to `ui/uiUtils.js`:**
+    *   Added `export let currentListeningSlide = { current: null };` to share the reference to the "Listening..." message slide.
+
+2.  **Manage "Listening..." Message in `ui/speechRecognition.js`:**
+    *   Imported `currentListeningSlide` (as `listeningSlideRef`).
+    *   In `recognition.onstart`:
+        *   Before adding a new "Listening..." message, any existing one is removed.
+        *   The new "Listening..." message slide is created and its reference stored in `listeningSlideRef.current`.
+    *   In `handleTranscription`:
+        *   After the `fetch` call to `/submit-transcribed-text` completes (whether successful or not), if `listeningSlideRef.current` exists, it is removed from the DOM and the reference is cleared. This ensures the "Listening..." message disappears once transcription is submitted.
+
+3.  **Remove Server Submission Confirmation Message in `ui/speechRecognition.js`:**
+    *   In `handleTranscription`, within the `if (response.ok)` block after a successful `fetch`, the line `addMessage(\`Server: \${result.message}\`, 'assistant-message');` was removed. The `response.json()` is still consumed, but its content (typically "Text submitted successfully.") is no longer displayed in the UI.
+
+**Current Status:**
+*   The UI now displays a "Listening..." message when speech recognition starts.
+*   This "Listening..." message is removed from the UI as soon as the transcribed text is sent to the server.
+*   The explicit "Server: text submitted successfully" message is no longer shown, streamlining the UI feedback loop. The appearance of the "Processing..." message now serves as the primary indicator that the submission was sent.
+*   These changes are client-side only.
+
+## 2025-06-02 (Part 8): Troubleshoot Mobile TTS Voice Selection
+
+**Objective:** Resolve an issue where the selected voice in the UI's dropdown menu was not being used for TTS output on mobile devices, even though it worked on desktop.
+
+**Initial State:** User reported that the voice selection menu worked fine (populated and selection used) prior to the current session's changes. The initial problem for this session was described as "assistant voice menu choice doesn't appear to be properly work on my mobile device."
+
+**Steps Taken & Findings:**
+
+1.  **Enhanced Logging (`ui/textToSpeech.js`):**
+    *   Added detailed console logging to `populateVoiceList`, `speak`, and `initializeTextToSpeech` to trace voice loading, selection, and usage.
+    *   Modified `populateVoiceList` to attempt to preserve the existing `voiceSelect.value` if the selected voice URI was still valid after `onvoiceschanged` fired.
+
+2.  **Speech Engine Priming (`ui/speechRecognition.js`):**
+    *   As mobile console logs were unavailable, implemented a common workaround: added a "priming" call (`speechSynthesis.speak()` with a silent, non-empty utterance ` ' ' `) triggered by the first click of the "Record Message" button.
+    *   **Observation:** After this, the user reported the voice menu *was* properly populated on mobile, and audio was heard, but it was a default voice, not the selected one.
+
+3.  **Temporary Removal of Priming:**
+    *   To isolate effects, the priming call was temporarily commented out.
+    *   **Observation:** This resulted in *no audio output* on both mobile and desktop, suggesting that a user-gesture-initiated `speechSynthesis.speak()` call is crucial for enabling TTS output for the session. Priming was then reinstated.
+
+4.  **Refined `speak()` Logic (`ui/textToSpeech.js`):**
+    *   Modified the `speak` function to call `speechSynthesis.getVoices()` directly at the time of speaking. This ensures it uses the absolute freshest list of voice objects from the browser when trying to find the voice matching `selectedVoiceURI`.
+
+5.  **Refined `populateVoiceList()` Logic (`ui/textToSpeech.js`):**
+    *   Further refined `populateVoiceList` to make the module-level `selectedVoiceURI` the primary source of truth. The function now tries to set the dropdown's visual selection (`voiceSelect.value`) to match `selectedVoiceURI`. If `selectedVoiceURI` is null or becomes invalid (e.g., after `onvoiceschanged`), then `populateVoiceList` picks a new default voice and updates both `voiceSelect.value` and the module-level `selectedVoiceURI`.
+
+**Final Test Results:**
+*   **Desktop:** TTS uses the voice selected in the dropdown menu correctly.
+*   **Mobile:**
+    *   The voice selection dropdown populates with options.
+    *   Audio output is functional (the priming step appears necessary for this).
+    *   However, the spoken voice is a default system voice, *not* the voice selected by the user in the dropdown.
+
+**Current Status & Conclusion:**
+*   The issue of the selected voice not being used on mobile persists, despite working on desktop.
+*   The problem is highly specific to the mobile browser's implementation or restrictions regarding the Web Speech API (`utterance.voice` assignment).
+*   Common JavaScript workarounds (priming, ensuring fresh voice lists, robust selection logic) have been attempted. The current client-side code appears logically sound for voice selection, as evidenced by correct behavior on desktop.
+*   Further resolution for mobile would likely require direct debugging on the target mobile device (e.g., with remote developer tools) to inspect console logs and API behavior, or more advanced, browser-specific handling that is beyond general best practices.
+*   The system is functional for voice selection on desktop, and provides audible (though default-voiced) TTS feedback on mobile.

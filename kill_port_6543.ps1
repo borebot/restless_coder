@@ -33,14 +33,14 @@ if ($processLines) {
         $pidString = $parts[-1]
 
         if ($pidString -match "^\d+$") {
-            $pid = [int]$pidString
-            Write-Host "Process with PID $pid found using port $Port on line: $targetLine"
-            Write-Host "Attempting to terminate PID $pid..."
+            $targetPid = [int]$pidString
+            Write-Host "Process with PID $targetPid found using port $Port on line: $targetLine"
+            Write-Host "Attempting to terminate PID $targetPid..."
             try {
-                Stop-Process -Id $pid -Force -ErrorAction Stop
-                Write-Host "Process PID $pid terminated successfully."
+                Stop-Process -Id $targetPid -Force -ErrorAction Stop
+                Write-Host "Process PID $targetPid terminated successfully."
             } catch {
-                Write-Error "Failed to terminate process PID $pid. Error: $($_.Exception.Message)"
+                Write-Error "Failed to terminate process PID $targetPid. Error: $($_.Exception.Message)"
                 Write-Host "You might need to run this script with administrator privileges."
             }
         } else {

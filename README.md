@@ -1,6 +1,6 @@
 # Restless Coder MCP Server
 
-NOTE: THIS IS PRE-RELEASE; STILL IMPLEMENTING CORE FUNCTIONS AS OF 6/1/2025
+NOTE: THIS IS PRE-RELEASE; CORE VOICE PROTOCOL FUNCTIONAL AS OF 6/2/2025
 
 
 **MCP server for voice interaction with coding assistants. Currently built for use with Cline, but may extend later.**
@@ -178,7 +178,7 @@ For Cline to pick up the new server configuration, you might need to:
 2.  Try asking Cline if it has access to an MCP server named `restless_coder` or a tool named `process_voice_command`.
 3.  If configured correctly, Cline should be able to find and use the server. The server itself will start running in the background when Cline tries to use it. You can check your system's process list for a `node` process running the `index.js` script.
 
-You should now be able to use the Restless Coder server with Cline! The server provides a UI for voice input at `http://localhost:6543` (once the server is started by Cline attempting to use it).
+You should now be able to use the Restless Coder server with Cline! The server provides a UI for voice input at `http://localhost:6543` (or `http://YOUR_COMPUTER_IP:6543` from other devices on your local network, once the server is started by Cline attempting to use it).
 
 ### Debugging
 
